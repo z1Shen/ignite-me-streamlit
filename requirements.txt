@@ -4,3 +4,4 @@ google-cloud-firestore
 streamlit
 streamlit-extras
 streamlit_modal
+streamlit_chat
