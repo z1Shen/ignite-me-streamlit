@@ -1,1 +1,1 @@
-# ignite-me-streamlit
+# IgniteMe.app

@@ -1,0 +1,5 @@
+toml
+google-auth-oauthlib
+google-cloud-firestore
+streamlit
+streamlit-extras
