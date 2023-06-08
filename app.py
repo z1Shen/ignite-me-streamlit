@@ -5,6 +5,7 @@ import streamlit as st
 from streamlit_modal import Modal
 from streamlit_card import card
 from streamlit_chat import message
+from gpt_api import GPT_API
 
 
 # Securely connect to Firebase
@@ -30,16 +31,18 @@ if 'toggle_dialog' not in st.session_state:
 if 'dialog_type' not in st.session_state:
     st.session_state['dialog_type'] = "initial"
 
-if 'goal_value' not in st.session_state:
-    st.session_state['goal_value'] = ""
+session_states = ['goal_value', 'goal', 'user_message', "user_answer",
+                  'user_goal', 'content', 'gpt_coach', 'gpt_response']
+for state in session_states:
+    if state not in st.session_state:
+        st.session_state[state] = ""
 
-if 'goal' not in st.session_state:
-    st.session_state['goal'] = ""
-
-if 'user_message' not in st.session_state:
-    st.session_state['user_message'] = ""
 
 # st.success(f"goal_value: {st.session_state['goal_value']}")
+
+def update_firebase(collection, post):
+    doc_ref = db.collection(collection).document()
+    doc_ref.set(post)
 
 
 def open_dialog():
@@ -49,25 +52,116 @@ def open_dialog():
 
 def initial_form():
     st.session_state['dialog_type'] = "follow-up"
+
     goal = st.session_state['goal_value']
-    # print(goal, obstacles_1, obstacles_2, obstacles_3)
-    if goal and obstacles_1 and obstacles_2 and obstacles_3:
+    if goal and obstacles_1:
         st.success(
-            f"Your goal is: {goal} Your obstacles are: {obstacles_1}, {obstacles_2}, {obstacles_3}")
+            f"You want to: {goal}, but: {obstacles_1}, {obstacles_2}, {obstacles_3}")
+
+        # Talk with GPT
+
+        # Prompts
+        clarification = """
+        Do you think I'm clear enough about my goal and obstacles? 
+        Ask questions if there's anything you think I need to think about further. 
+        The goal is to help me structure my thoughts and be clear about the challenges I have. 
+        Make sure the thought process is MECE (Mutually Exclusive, Collectively Exhaustive). 
+        Ask one clarification question at a time.
+        
+        Response format (remove all spaces and indentations):
+        ```json
+        {
+            "success": false,
+            "response": "put your questions or response here"
+        }
+        ```
+        """
+
+        user_input = "My goal is: {}, but I can't because:\n 1. {}\n 2.{}\n 3. {}".format(
+            goal, obstacles_1, obstacles_2, obstacles_3)
+
+        # Initialize GPT
+        gpt_coach = GPT_API()
+        gpt_response = gpt_coach.chat(user_input + clarification)
+        st.session_state['gpt_coach'] = gpt_coach
+
+        gpt_response = json.loads(gpt_response)
+        print(gpt_response)
+        st.session_state['gpt_response'] = gpt_response['response']
+
     else:
         st.warning("Please fill all the fields")
 
 
 def follow_up_form():
-    st.session_state['dialog_type'] = "initial"
-    st.session_state['toggle_dialog'] = False
     if answer:
-        st.success(f"answer: {answer}")
+
+        # GPT
+        instructions = """
+        If you've fully understood my goal and obstacles, show me the summary and ask me for confirmation.
+        If I confirm, output the summary
+        
+        Response format (remove all spaces and indentations):
+        ```json
+        {
+            "success": false, # use true after I confirm the summary,
+            "response": "put your questions or response here"",
+            "output": {
+                "goal": "summarize my goal",
+                "obastacles": [summarize the list of obastacles in the way that is actionable]
+            }
+            
+        }
+        ```
+        """
+
+        gpt_coach = st.session_state['gpt_coach']
+        gpt_response = gpt_coach.chat(answer + instructions)
+        st.session_state['gpt_coach'] = gpt_coach
+
+        gpt_response = json.loads(gpt_response)
+        print(gpt_response)
+
+        if gpt_response['success']:
+            st.session_state['toggle_dialog'] = False
+            st.session_state['dialog_type'] = "initial"
+            update_firebase("posts", gpt_response['output'])
+        else:
+            st.session_state['gpt_response'] = gpt_response['response']
+
     else:
         st.warning("Please fill all the fields")
 
 
-def card_popup():
+modal = Modal(st.session_state['user_goal'], key="card_modal")
+if modal.is_open():
+    with modal.container():
+        left, right = st.columns(2)
+        with left:
+            choice = st.radio("option_radio", st.session_state['content'],
+                              label_visibility="collapsed")
+        with right:
+            st.subheader(choice)
+            st.divider()
+            st.caption(
+                "Here's what others have said about this obstacle. Coming Soon!")
+            # messages = [
+            #     test for test in test_message if test['choice'] == choice][0]['data']
+            # with st.container():
+            #     for data in messages:
+            #         name, message, space = st.columns([1, 5, 2])
+            #         name.write(data['user'])
+            #         message.write(data['message'])
+            #         space.empty()
+
+            #     input_text = st.text_input(
+            #         "user_input", key="input", label_visibility="collapsed")
+
+
+def card_popup(post):
+    print(post)
+    st.session_state['user_goal'] = post["goal"]
+    st.session_state['content'] = post["obstacles"]
     modal.open()
 
 
@@ -94,16 +188,15 @@ with input.container():
             st.button(
                 "Submit", on_click=initial_form)
         else:
-            gpt_question = "I have a clarification question for you. What do you mean by ... "
-            st.write(gpt_question)
+            st.write(st.session_state['gpt_response'])
             answer = st.text_input(
-                "answer", label_visibility="collapsed")
+                "answer", key="user_answer", label_visibility="collapsed")
             st.button("Submit", on_click=follow_up_form)
     else:
         input.text_input("What is your goal today", placeholder="I want to ...",
 
                          key="goal", max_chars=50, on_change=open_dialog)
-
+navbar.divider()
 
 # Chatbot
 if 'generated' not in st.session_state:
@@ -165,74 +258,21 @@ test_message = [
 ]
 
 
-user_goal = ["I want to make money", "I'm tired", "I'm hungry", "I'm sleepy"]
+# # Tabs of Categories
+# categories = ["For You", "Following", "Your Posts"]
+# tab_list = st.tabs(categories)
+# for tab, category in zip(tab_list, categories):
 
 
-# Card Popup
-modal = Modal(user_goal[0], key="card_modal")
-if modal.is_open():
-    with modal.container():
-        left, right = st.columns([1, 2])
-        with left:
-            option = user_goal
-            choice = st.radio("option_radio", option,
-                              label_visibility="collapsed")
-        with right:
-            st.subheader(choice)
-            st.divider()
-            messages = [
-                test for test in test_message if test['choice'] == choice][0]['data']
-            with st.container():
-                for data in messages:
-                    name, message, space = st.columns([1, 5, 2])
-                    name.write(data['user'])
-                    message.write(data['message'])
-                    space.empty()
+# Grid of Card
+items_per_col = 4
+post_refs = db.collection("posts")
+docs = post_refs.stream()
 
-                input_text = st.text_input(
-                    "user_input", key="input", label_visibility="collapsed")
-
-
-# Tabs of Categories
-categories = ["For You", "Following", "Your Posts"]
-grid_size = [2, 3]
-
-tab_list = st.tabs(categories)
-for tab, category in zip(tab_list, categories):
-
-    # Grid of Card
-    grid = tab.container()
-    for i in range(grid_size[0]):
-        col_list = grid.columns(grid_size[1])
-        col_len = len(col_list)
-        for col, n in zip(col_list, range(col_len)):
-            with col:
-                clicked_card = card(
-                    title=category,
-                    text=str(n) + str(i),
-                    image="",
-                )
-                if clicked_card:
-                    card_popup()
-
-
-# # Once the user has submitted, upload it to the database
-# if title and url and submit:
-#     doc_ref = db.collection("posts").document(title)
-#     doc_ref.set({
-#         "title": title,
-#         "url": url
-#     })
-
-
-# # And then render each post, using some light Markdown
-# posts_ref = db.collection("posts")
-# refs = posts_ref  # .where('title', '==', 'Apple')
-
-# for doc in refs.stream():
-#     post = doc.to_dict()
-#     title = post["title"]
-#     url = post["url"]
-
-#     st.subheader(f"Post: {title}")
-#     st.write(f":link: [{url}]({url})")
+col_list = st.columns(items_per_col)
+for doc, col, i in zip(docs, col_list, range(items_per_col)):
+    with col:
+        post = doc.to_dict()
+        st.header(post["goal"])
+        st.button('View', key=i, on_click=card_popup, args=(post,))
+        st.divider()
