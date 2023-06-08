@@ -5,7 +5,6 @@ import streamlit as st
 from streamlit_modal import Modal
 from streamlit_card import card
 from streamlit_chat import message
-import requests
 
 
 # Securely connect to Firebase
@@ -44,27 +43,32 @@ if 'user_message' not in st.session_state:
 
 
 def open_dialog():
-    pass
+    st.session_state['toggle_dialog'] = True
+    st.session_state['goal_value'] = st.session_state['goal']
 
 
 def initial_form():
     st.session_state['dialog_type'] = "follow-up"
     goal = st.session_state['goal_value']
+    # print(goal, obstacles_1, obstacles_2, obstacles_3)
     if goal and obstacles_1 and obstacles_2 and obstacles_3:
         st.success(
-            f"Goal: {goal}, obstacles: {obstacles_1}, {obstacles_2}, {obstacles_3}")
+            f"Your goal is: {goal} Your obstacles are: {obstacles_1}, {obstacles_2}, {obstacles_3}")
     else:
         st.warning("Please fill all the fields")
 
 
 def follow_up_form():
-    # st.session_state['goal'] = ""
     st.session_state['dialog_type'] = "initial"
     st.session_state['toggle_dialog'] = False
     if answer:
         st.success(f"answer: {answer}")
     else:
         st.warning("Please fill all the fields")
+
+
+def card_popup():
+    modal.open()
 
 
 # Navbar
@@ -90,7 +94,7 @@ with input.container():
             st.button(
                 "Submit", on_click=initial_form)
         else:
-            gpt_question = "hello"
+            gpt_question = "I have a clarification question for you. What do you mean by ... "
             st.write(gpt_question)
             answer = st.text_input(
                 "answer", label_visibility="collapsed")
@@ -187,13 +191,6 @@ if modal.is_open():
 
                 input_text = st.text_input(
                     "user_input", key="input", label_visibility="collapsed")
-
-
-# Card Popup
-
-
-def card_popup():
-    modal.open()
 
 
 # Tabs of Categories
