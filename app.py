@@ -106,7 +106,7 @@ def follow_up_form():
         {
             "success": false, # use true after I confirm the summary,
             "response": "put your questions or response here"",
-            "output": {
+            "output": {  # when success is true, output the summary
                 "goal": "summarize my goal",
                 "obastacles": [summarize the list of obastacles in the way that is actionable]
             }
@@ -128,6 +128,7 @@ def follow_up_form():
             update_firebase("posts", gpt_response['output'])
         else:
             st.session_state['gpt_response'] = gpt_response['response']
+            st.session_state['user_answer'] = ""
 
     else:
         st.warning("Please fill all the fields")

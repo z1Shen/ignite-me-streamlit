@@ -1,14 +1,15 @@
-import os
+# import os
 import openai
 from dotenv import load_dotenv
+import streamlit as st
 
 
-load_dotenv()
+# load_dotenv()
 
 
 class GPT_API:
     def __init__(self):
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+        openai.api_key = st.secrets["OPENAI_API_KEY"]
         self.memory = True
         self.messages = []
 
@@ -31,5 +32,5 @@ class GPT_API:
             self.messages.append(
                 {"role": "assistant", "content": response["choices"][0]["message"].content})
         else:
-            self.messages = c.messages[:-1]
+            self.messages = self.messages[:-1]
         return response.choices[0].message.content
