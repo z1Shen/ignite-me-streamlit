@@ -12,6 +12,7 @@ from gpt_api import GPT_API
 key_dict = json.loads(st.secrets["textkey"])
 creds = service_account.Credentials.from_service_account_info(key_dict)
 db = firestore.Client(credentials=creds)
+batch = db.batch()
 
 
 # Set the default page config and load css
@@ -27,18 +28,29 @@ with open('style.css') as f:
 # Initialise session state variables
 session_states = ['goal_value', 'goal', 'user_message', "user_answer",
                   'user_goal', 'content', 'gpt_coach', 'gpt_response',
-                  'obstacles_1', 'obstacles_2', 'obstacles_3', 'dialog_type', 'toggle_dialog']
+                  'obstacles_1', 'obstacles_2', 'obstacles_3', 'dialog_type', 'post_id', 'user_input', 'user_name', 'obstacle_id', 'obstacle_value']
 for state in session_states:
     if state not in st.session_state:
         st.session_state[state] = ""
+
+session_states = ['expand_post', 'toggle_dialog']
+for state in session_states:
+    if state not in st.session_state:
+        st.session_state[state] = False
 
 
 # Define Components
 
 
-def update_firebase(collection, post):
+def update_firebase(collection, data):
     doc_ref = db.collection(collection).document()
-    doc_ref.set(post)
+    doc_ref.set(data)
+
+
+def stream_firebase(collection):
+    post_refs = db.collection(collection)
+    docs = post_refs.stream()
+    return docs
 
 
 def open_dialog():
@@ -107,11 +119,13 @@ def follow_up_form():
         {
             "success": false, # use true after I confirm the summary,
             "response": "put your questions or response here"",
-            "output": {  # when success is true, output the summary
-                "goal": "summarize my goal",
-                "obastacles": [summarize the list of obastacles in the way that is actionable]
-            }
-            
+            "goal": 
+                {"content: "summarize my goal"} # when success is true, output the summary"
+            "obstacles": [
+                {"content": "obstacles #1"}, # # when success is true, output the summary of obastacles in list
+                {"content": "obstacles #2"}
+                ...
+            ]
         }
         ```
         """
@@ -124,10 +138,16 @@ def follow_up_form():
         print(gpt_response)
 
         if gpt_response['success']:
-            print(gpt_response['output'])
             st.session_state['toggle_dialog'] = False
             st.session_state['dialog_type'] = ""
-            update_firebase("posts", gpt_response['output'])
+
+            user_ref = db.collection('posts').document()
+            gpt_response['goal']['user_name'] = st.session_state['user_name']
+            batch.set(user_ref, gpt_response['goal'])
+            for obstacle_value in gpt_response['obstacles']:
+                subcollection_ref = user_ref.collection('obstacles').document()
+                batch.set(subcollection_ref, obstacle_value)
+            batch.commit()
         else:
             st.session_state['gpt_response'] = gpt_response['response']
             st.session_state['user_answer'] = ""
@@ -136,23 +156,23 @@ def follow_up_form():
         st.warning("Please fill all the fields")
 
 
-def card_popup(post):
-    print(post)
-    st.session_state['user_goal'] = post["goal"]
-    st.session_state['content'] = post["obstacles"]
-    modal.open()
-
-
 def card_grid(items_per_col):
-    post_refs = db.collection("posts")
-    docs = post_refs.stream()
-
+    docs = stream_firebase("posts")
     col_list = st.columns(items_per_col)
     for doc, col, i in zip(docs, col_list, range(items_per_col)):
         with col:
             post = doc.to_dict()
-            st.header(post["goal"])
-            st.button('View', key=i, on_click=card_popup, args=(post,))
+            post['id'] = doc.id
+
+            clicked = card(title=post["content"],
+                           text=post["user_name"], key=i)
+
+            # clicked = st.button('View', key=i)
+            if clicked:
+                st.session_state['user_goal'] = post["content"]
+                st.session_state['obstacle_value'] = ''
+                st.session_state['post_id'] = post['id']
+                st.session_state['expand_post'] = True
             st.divider()
 
 
@@ -170,17 +190,17 @@ def navbar():
         if st.session_state['toggle_dialog']:
             if st.session_state['dialog_type'] == "":
                 st.write("What stops you from achieving your goal?")
-                obstacles_1 = st.text_input("obstacles_1", key="obstacles_1", placeholder="But...",
-                                            label_visibility="collapsed")
-                obstacles_2 = st.text_input("obstacles_2", key="obstacles_2", value="", placeholder="And also...",
-                                            label_visibility="collapsed")
-                obstacles_3 = st.text_input("obstacles_3", key="obstacles_3", value="", placeholder="Here is one more...",
-                                            label_visibility="collapsed")
+                st.text_input("obstacles_1", key="obstacles_1", placeholder="But...",
+                              label_visibility="collapsed")
+                st.text_input("obstacles_2", key="obstacles_2", value="", placeholder="And also...",
+                              label_visibility="collapsed")
+                st.text_input("obstacles_3", key="obstacles_3", value="", placeholder="Here is one more...",
+                              label_visibility="collapsed")
                 st.button(
                     "Submit", on_click=initial_form)
             else:
                 st.write(st.session_state['gpt_response'])
-                answer = st.text_input(
+                st.text_input(
                     "answer", key="user_answer", label_visibility="collapsed")
                 st.button("Submit", on_click=follow_up_form)
         else:
@@ -190,98 +210,64 @@ def navbar():
     navbar.divider()
 
 
-def popup_window():
-    modal = Modal(st.session_state['user_goal'], key="card_modal")
-    if modal.is_open():
-        with modal.container():
+def submit_message():
+    collection = "posts/{}/obstacles/{}/messages".format(
+        st.session_state['post_id'], st.session_state['obstacle_id'])
+    data = {"content": st.session_state['user_input'],
+            "user": st.session_state['user_name']}
+    update_firebase(collection, data)
+
+
+def post_expander():
+    if st.session_state['post_id']:
+        with st.expander(st.session_state['user_goal'], expanded=st.session_state['expand_post']):
             left, right = st.columns(2)
             with left:
-                choice = st.radio("option_radio", st.session_state['content'],
-                                  label_visibility="collapsed")
+                collection = "posts/{}/obstacles".format(
+                    st.session_state['post_id'])
+                obstacles = stream_firebase(collection)
+                for obstacle in obstacles:
+                    data = obstacle.to_dict()
+                    clicked = st.button(data['content'])
+                    if clicked:
+                        st.session_state['obstacle_value'] = data['content']
+                        st.session_state['obstacle_id'] = obstacle.id
+
             with right:
-                st.subheader(choice)
-                st.divider()
-                st.caption(
-                    "Here's what others have said about this obstacle. Coming Soon!")
-                # messages = [
-                #     test for test in test_message if test['choice'] == choice][0]['data']
-                # with st.container():
-                #     for data in messages:
-                #         name, message, space = st.columns([1, 5, 2])
-                #         name.write(data['user'])
-                #         message.write(data['message'])
-                #         space.empty()
+                if st.session_state['obstacle_value']:
+                    st.subheader(st.session_state['obstacle_value'])
+                    st.divider()
+                    collection = "posts/{}/obstacles/{}/messages".format(
+                        st.session_state['post_id'], st.session_state['obstacle_id'])
+                    docs = stream_firebase(collection)
+                    for doc in docs:
+                        data = doc.to_dict()
 
-                #     input_text = st.text_input(
-                #         "user_input", key="input", label_visibility="collapsed")
-    return modal
+                        name, content, space = st.columns([2, 5, 2])
+                        name.write(data['user'])
+                        content.write(data['content'])
+                        space.empty()
+
+                    st.text_input(
+                        "user_input", key="user_input", label_visibility="collapsed")
+                    st.button("Submit", key="message_button",
+                              on_click=submit_message)
+                else:
+                    st.empty()
 
 
-# Chatbox
-if 'generated' not in st.session_state:
-    st.session_state['generated'] = []
+login = False
+if login:
+    st.session_state['user_name'] = "123"
+else:
+    st.session_state['user_name'] = "Anonymous"
 
-if 'past' not in st.session_state:
-    st.session_state['past'] = []
-
-test_message = [
-    {
-        "choice": "I want to make money",
-        "data": [
-            {"user": "John", "message": "I have a great business idea"},
-            {"user": "Ted", "message": "Count me in!"},
-            {"user": "Eddie", "message": "Let's start a startup together"},
-            {"user": "John", "message": "I'm excited about the potential"},
-            {"user": "Ted", "message": "Me too, we can make it happen"},
-            {"user": "Eddie", "message": "Absolutely, let's go for it"},
-            {"user": "G", "message": "This is a long message to test the length of the message"},
-        ]
-    },
-    {
-        "choice": "I'm tired",
-        "data": [
-            {"user": "John", "message": "I need a good night's sleep"},
-            {"user": "Ted", "message": "I'm exhausted too"},
-            {"user": "Eddie", "message": "Let's take a break and recharge"},
-            {"user": "John", "message": "I agree, we've been working non-stop"},
-            {"user": "Ted", "message": "We deserve some rest"},
-            {"user": "Eddie", "message": "Absolutely, let's relax for a while"},
-            {"user": "G", "message": "This is a long message to test the length of the message"},
-
-        ]
-    },
-    {
-        "choice": "I'm hungry",
-        "data": [
-            {"user": "John", "message": "I'm craving pizza"},
-            {"user": "Ted", "message": "Pizza sounds delicious"},
-            {"user": "Eddie", "message": "Let's order some right away"},
-            {"user": "John", "message": "I can't resist a good pizza"},
-            {"user": "Ted", "message": "Me neither, let's satisfy our hunger"},
-            {"user": "Eddie", "message": "Absolutely, pizza party it is!"},
-            {"user": "G", "message": "This is a long message to test the length of the message"},
-        ]
-    },
-    {
-        "choice": "I'm sleepy",
-        "data": [
-            {"user": "John", "message": "I need a comfortable bed"},
-            {"user": "Ted", "message": "Let's take a quick nap"},
-            {"user": "Eddie", "message": "I wish I could sleep right now"},
-            {"user": "John", "message": "I feel like a power nap would help"},
-            {"user": "Ted", "message": "Agreed, a short rest can boost productivity"},
-            {"user": "Eddie", "message": "I can barely keep my eyes open"},
-            {"user": "G", "message": "This is a long message to test the length of the message"},
-        ]
-    }
-]
+navbar()
+card_grid(3)
+post_expander()
 
 
 # # Tabs of Categories
 # categories = ["For You", "Following", "Your Posts"]
 # tab_list = st.tabs(categories)
 # for tab, category in zip(tab_list, categories):
-
-navbar()
-card_grid(4)
-modal = popup_window()
