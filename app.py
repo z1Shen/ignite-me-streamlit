@@ -14,31 +14,27 @@ creds = service_account.Credentials.from_service_account_info(key_dict)
 db = firestore.Client(credentials=creds)
 
 
-# Set the default page config
+# Set the default page config and load css
 st.set_page_config(
     layout="wide",
     page_title='IgniteMe.app'
 )
 
-# Load css
 with open('style.css') as f:
     st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
+
 # Initialise session state variables
-if 'toggle_dialog' not in st.session_state:
-    st.session_state['toggle_dialog'] = False
-
-if 'dialog_type' not in st.session_state:
-    st.session_state['dialog_type'] = "initial"
-
 session_states = ['goal_value', 'goal', 'user_message', "user_answer",
-                  'user_goal', 'content', 'gpt_coach', 'gpt_response']
+                  'user_goal', 'content', 'gpt_coach', 'gpt_response',
+                  'obstacles_1', 'obstacles_2', 'obstacles_3', 'dialog_type', 'toggle_dialog']
 for state in session_states:
     if state not in st.session_state:
         st.session_state[state] = ""
 
 
-# st.success(f"goal_value: {st.session_state['goal_value']}")
+# Define Components
+
 
 def update_firebase(collection, post):
     doc_ref = db.collection(collection).document()
@@ -54,6 +50,10 @@ def initial_form():
     st.session_state['dialog_type'] = "follow-up"
 
     goal = st.session_state['goal_value']
+    obstacles_1 = st.session_state['obstacles_1']
+    obstacles_2 = st.session_state['obstacles_2']
+    obstacles_3 = st.session_state['obstacles_3']
+
     if goal and obstacles_1:
         st.success(
             f"You want to: {goal}, but: {obstacles_1}, {obstacles_2}, {obstacles_3}")
@@ -94,6 +94,7 @@ def initial_form():
 
 
 def follow_up_form():
+    answer = st.session_state['user_answer']
     if answer:
 
         # GPT
@@ -123,8 +124,9 @@ def follow_up_form():
         print(gpt_response)
 
         if gpt_response['success']:
+            print(gpt_response['output'])
             st.session_state['toggle_dialog'] = False
-            st.session_state['dialog_type'] = "initial"
+            st.session_state['dialog_type'] = ""
             update_firebase("posts", gpt_response['output'])
         else:
             st.session_state['gpt_response'] = gpt_response['response']
@@ -134,31 +136,6 @@ def follow_up_form():
         st.warning("Please fill all the fields")
 
 
-modal = Modal(st.session_state['user_goal'], key="card_modal")
-if modal.is_open():
-    with modal.container():
-        left, right = st.columns(2)
-        with left:
-            choice = st.radio("option_radio", st.session_state['content'],
-                              label_visibility="collapsed")
-        with right:
-            st.subheader(choice)
-            st.divider()
-            st.caption(
-                "Here's what others have said about this obstacle. Coming Soon!")
-            # messages = [
-            #     test for test in test_message if test['choice'] == choice][0]['data']
-            # with st.container():
-            #     for data in messages:
-            #         name, message, space = st.columns([1, 5, 2])
-            #         name.write(data['user'])
-            #         message.write(data['message'])
-            #         space.empty()
-
-            #     input_text = st.text_input(
-            #         "user_input", key="input", label_visibility="collapsed")
-
-
 def card_popup(post):
     print(post)
     st.session_state['user_goal'] = post["goal"]
@@ -166,40 +143,81 @@ def card_popup(post):
     modal.open()
 
 
-# Navbar
-if len(st.session_state['user_message']) > 0:
-    st.write(st.session_state['user_message'])
-navbar = st.container()
-logo, left, input, right, login = navbar.columns([1, 1, 3, 1, 1])
-logo.image("./public/logo.png", use_column_width=True)
-login.button("Login")
-left.empty()
-right.empty()
+def card_grid(items_per_col):
+    post_refs = db.collection("posts")
+    docs = post_refs.stream()
 
-with input.container():
-    if st.session_state['toggle_dialog']:
-        if st.session_state['dialog_type'] == "initial":
-            st.write("What stops you from achieving your goal?")
-            obstacles_1 = st.text_input("obs_1", placeholder="But...",
-                                        label_visibility="collapsed")
-            obstacles_2 = st.text_input("obs_2", value="", placeholder="And also...",
-                                        label_visibility="collapsed")
-            obstacles_3 = st.text_input("obs_3", value="", placeholder="Here is one more...",
-                                        label_visibility="collapsed")
-            st.button(
-                "Submit", on_click=initial_form)
+    col_list = st.columns(items_per_col)
+    for doc, col, i in zip(docs, col_list, range(items_per_col)):
+        with col:
+            post = doc.to_dict()
+            st.header(post["goal"])
+            st.button('View', key=i, on_click=card_popup, args=(post,))
+            st.divider()
+
+
+def navbar():
+    if len(st.session_state['user_message']) > 0:
+        st.write(st.session_state['user_message'])
+    navbar = st.container()
+    logo, left, input, right, login = navbar.columns([1, 1, 3, 1, 1])
+    logo.image("./public/logo.png", use_column_width=True)
+    login.button("Login")
+    left.empty()
+    right.empty()
+
+    with input.container():
+        if st.session_state['toggle_dialog']:
+            if st.session_state['dialog_type'] == "":
+                st.write("What stops you from achieving your goal?")
+                obstacles_1 = st.text_input("obstacles_1", key="obstacles_1", placeholder="But...",
+                                            label_visibility="collapsed")
+                obstacles_2 = st.text_input("obstacles_2", key="obstacles_2", value="", placeholder="And also...",
+                                            label_visibility="collapsed")
+                obstacles_3 = st.text_input("obstacles_3", key="obstacles_3", value="", placeholder="Here is one more...",
+                                            label_visibility="collapsed")
+                st.button(
+                    "Submit", on_click=initial_form)
+            else:
+                st.write(st.session_state['gpt_response'])
+                answer = st.text_input(
+                    "answer", key="user_answer", label_visibility="collapsed")
+                st.button("Submit", on_click=follow_up_form)
         else:
-            st.write(st.session_state['gpt_response'])
-            answer = st.text_input(
-                "answer", key="user_answer", label_visibility="collapsed")
-            st.button("Submit", on_click=follow_up_form)
-    else:
-        input.text_input("What is your goal today", placeholder="I want to ...",
+            input.text_input("What is your goal today", placeholder="I want to ...",
 
-                         key="goal", max_chars=50, on_change=open_dialog)
-navbar.divider()
+                             key="goal", max_chars=50, on_change=open_dialog)
+    navbar.divider()
 
-# Chatbot
+
+def popup_window():
+    modal = Modal(st.session_state['user_goal'], key="card_modal")
+    if modal.is_open():
+        with modal.container():
+            left, right = st.columns(2)
+            with left:
+                choice = st.radio("option_radio", st.session_state['content'],
+                                  label_visibility="collapsed")
+            with right:
+                st.subheader(choice)
+                st.divider()
+                st.caption(
+                    "Here's what others have said about this obstacle. Coming Soon!")
+                # messages = [
+                #     test for test in test_message if test['choice'] == choice][0]['data']
+                # with st.container():
+                #     for data in messages:
+                #         name, message, space = st.columns([1, 5, 2])
+                #         name.write(data['user'])
+                #         message.write(data['message'])
+                #         space.empty()
+
+                #     input_text = st.text_input(
+                #         "user_input", key="input", label_visibility="collapsed")
+    return modal
+
+
+# Chatbox
 if 'generated' not in st.session_state:
     st.session_state['generated'] = []
 
@@ -264,16 +282,6 @@ test_message = [
 # tab_list = st.tabs(categories)
 # for tab, category in zip(tab_list, categories):
 
-
-# Grid of Card
-items_per_col = 4
-post_refs = db.collection("posts")
-docs = post_refs.stream()
-
-col_list = st.columns(items_per_col)
-for doc, col, i in zip(docs, col_list, range(items_per_col)):
-    with col:
-        post = doc.to_dict()
-        st.header(post["goal"])
-        st.button('View', key=i, on_click=card_popup, args=(post,))
-        st.divider()
+navbar()
+card_grid(4)
+modal = popup_window()
