@@ -162,10 +162,9 @@ def card_grid(items_per_col):
             post = doc.to_dict()
             post['id'] = doc.id
 
-            clicked = card(title=post["content"],
-                           text=post["user_name"], key=i)
-
-            # clicked = st.button('View', key=i)
+            st.header(post["content"])
+            st.caption(post["user_name"])
+            clicked = st.button('View', key=i)
             if clicked:
                 st.session_state['user_goal'] = post["content"]
                 st.session_state['obstacle_value'] = ''
