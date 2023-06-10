@@ -67,12 +67,10 @@ def initial_form():
     obstacles_3 = st.session_state['obstacles_3']
 
     if goal and obstacles_1:
-        st.success(
-            f"You want to: {goal}, but: {obstacles_1}, {obstacles_2}, {obstacles_3}")
+        # st.success(
+        #     f"You want to: {goal}, but: {obstacles_1}, {obstacles_2}, {obstacles_3}")
 
         # Talk with GPT
-
-        # Prompts
         clarification = """
         Do you think I'm clear enough about my goal and obstacles? 
         Ask questions if there's anything you think I need to think about further. 
@@ -83,8 +81,8 @@ def initial_form():
         Response format (remove all spaces and indentations):
         ```json
         {
-            "success": false,
-            "response": "put your questions or response here"
+            "success": false, # it has to be false for this form
+            "response": "put your questions or response here, in one sentence",
         }
         ```
         """
@@ -120,7 +118,7 @@ def follow_up_form():
             "success": false, # use true after I confirm the summary,
             "response": "put your questions or response here"",
             "goal": 
-                {"content: "summarize my goal"} # when success is true, output the summary"
+                {"content: "goal"} # when success is true, output the summary of my goal"
             "obstacles": [
                 {"content": "obstacles #1"}, # # when success is true, output the summary of obastacles in list
                 {"content": "obstacles #2"}

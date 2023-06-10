@@ -5,3 +5,4 @@ streamlit
 streamlit-extras
 streamlit_modal
 streamlit_chat
+openai
