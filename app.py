@@ -13,9 +13,8 @@ from firebase_admin import firestore
 # Securely connect to Firebase
 if not firebase_admin._apps:
     key_dict = json.loads(st.secrets["textkey"])
-    # creds = service_account.Credentials.from_service_account_info(key_dict)
-    cred = credentials.Certificate("firestore-key.json")
-    firebase_admin.initialize_app(cred)
+    creds = service_account.Credentials.from_service_account_info(key_dict)
+    firebase_admin.initialize_app(creds)
 db = firestore.client()
 batch = db.batch()
 
@@ -277,12 +276,16 @@ def navbar():
 
 
 def submit_message():
-    collection = "posts/{}/obstacles/{}/messages".format(
-        st.session_state['post_id'], st.session_state['obstacle_id'])
-    data = {"content": st.session_state['user_input'],
-            "user_info": st.session_state['user_info']}
-    update_firebase(collection, data)
-    st.session_state['user_input'] = ""
+    if st.session_state['user_info']:
+        collection = "posts/{}/obstacles/{}/messages".format(
+            st.session_state['post_id'], st.session_state['obstacle_id'])
+        data = {"content": st.session_state['user_input'],
+                "user_info": st.session_state['user_info']}
+        update_firebase(collection, data)
+        st.session_state['user_input'] = ""
+    else:
+        st.session_state['authentication'] = True
+        st.warning("Please sign in to submit message")
 
 
 def post_expander():
