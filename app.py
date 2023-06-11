@@ -1,20 +1,15 @@
 import json
-from google.cloud import firestore
-from google.oauth2 import service_account
 import streamlit as st
-# from streamlit_modal import Modal
-from gpt_api import GPT_API
 import firebase_admin
-from firebase_admin import credentials
-from firebase_admin import auth
-from firebase_admin import firestore
+from firebase_admin import credentials, firestore, auth
+from gpt_api import GPT_API
 
 
 # Securely connect to Firebase
 if not firebase_admin._apps:
     key_dict = json.loads(st.secrets["textkey"])
-    creds = service_account.Credentials.from_service_account_info(key_dict)
-    firebase_admin.initialize_app(creds)
+    cred = credentials.Certificate(key_dict)
+    firebase_admin.initialize_app(cred)
 db = firestore.client()
 batch = db.batch()
 
