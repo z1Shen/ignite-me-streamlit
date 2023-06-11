@@ -6,4 +6,4 @@ streamlit-extras
 streamlit_modal
 streamlit_chat
 openai
-python==3.10.10
+firebase_admin
