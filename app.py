@@ -30,18 +30,19 @@ with open('style.css') as f:
 # Initialise session state variables
 session_states = ['goal_value', 'goal', 'user_message', "user_answer",
                   'user_goal', 'content', 'gpt_coach', 'gpt_response',
-                  'obstacles_1', 'obstacles_2', 'obstacles_3', 'dialog_type', 'post_id', 'user_input', 'obstacle_id', 'obstacle_value', 'user_info', 'auth_info', 'gpt_response']
+                  'obstacles_1', 'obstacles_2', 'obstacles_3', 'dialog_type', 'user_input', 'obstacle', 'user_info', 'auth_info', 'gpt_response', 'post']
 for state in session_states:
     if state not in st.session_state:
         st.session_state[state] = ""
 
-session_states = ['expand_post', 'toggle_dialog', 'login', 'signup', 'post_id']
+session_states = ['expand_post', 'toggle_dialog', 'login', 'signup']
 for state in session_states:
     if state not in st.session_state:
         st.session_state[state] = False
 
-
 # Define Components
+
+
 def update_firebase(collection, data):
     doc_ref = db.collection(collection).document()
     doc_ref.set(data)
@@ -239,11 +240,8 @@ def card_grid(n_cols, n_rows=10):
             st.caption(post['user_info']["user_name"])
             clicked = st.button('View', key=i)
             if clicked:
-                st.session_state['user_goal'] = post["content"]
-                st.session_state['obstacle_value'] = ''
-                st.session_state['post_id'] = post['id']
-                # open_expdander()
-
+                st.session_state['post'] = post
+                st.session_state['expand_post'] = True
             st.divider()
 
 
@@ -296,70 +294,59 @@ def navbar():
     navbar.divider()
 
 
-def submit_message():
+def submit_message(collection):
     if st.session_state['user_info']:
-        collection = "posts/{}/obstacles/{}/messages".format(
-            st.session_state['post_id'], st.session_state['obstacle_id'])
         data = {"content": st.session_state['user_input'],
                 "user_info": st.session_state['user_info']}
         update_firebase(collection, data)
-        st.session_state['user_input'] = ""
+        st.session_state['user_input'] = ''
     else:
         st.session_state['login'] = True
         st.warning("Please Sign In First")
-        # close_expander()
-
-
-# def open_expdander():
-    # post_modal.open()
-    # st.session_state['expand_post'] = True
-
-
-def close_expander():
-    # post_modal.close()
-    st.session_state['post_id'] = False
 
 
 def post_expander():
-    if st.session_state['post_id']:
-        # with st.expander(st.session_state['user_goal'], expanded=st.session_state['expand_post']):
-        left, right = st.columns(2)
-        with left:
-            collection = "posts/{}/obstacles".format(
-                st.session_state['post_id'])
-            obstacles = stream_firebase(collection)
-            st.header(st.session_state['user_goal'])
-            for obstacle in obstacles:
-                data = obstacle.to_dict()
-                clicked = st.button(data['content'])
-                if clicked:
-                    st.session_state['obstacle_value'] = data['content']
-                    st.session_state['obstacle_id'] = obstacle.id
+    left, right = st.columns(2)
+    post = st.session_state['post']
+    with left:
+        st.header(post['content'])
+        collection = f"posts/{post['id']}/obstacles"
+        obstacles = stream_firebase(collection)
+        st.header(st.session_state['user_goal'])
+        for obstacle in obstacles:
+            data = obstacle.to_dict()
+            data['id'] = obstacle.id
+            clicked_obstacle = st.button(data['content'])
+            if clicked_obstacle:
+                st.session_state['obstacle'] = data
+
+    with right:
+        if st.session_state['obstacle']:
+            obstacle = st.session_state['obstacle']
+            st.subheader(obstacle['content'])
             st.divider()
-            st.button("Close", type='primary', on_click=close_expander())
+            collection = f"posts/{post['id']}/obstacles/{obstacle['id']}/messages"
+            docs = stream_firebase(collection)
+            for doc in docs:
+                data = doc.to_dict()
 
-        with right:
-            if st.session_state['obstacle_value']:
-                st.subheader(st.session_state['obstacle_value'])
-                st.divider()
-                collection = "posts/{}/obstacles/{}/messages".format(
-                    st.session_state['post_id'], st.session_state['obstacle_id'])
-                docs = stream_firebase(collection)
-                for doc in docs:
-                    data = doc.to_dict()
+                name, content, space = st.columns([2, 5, 2])
+                name.write(data['user_info']['user_name'])
+                content.write(data['content'])
+                space.empty()
 
-                    name, content, space = st.columns([2, 5, 2])
-                    name.write(data['user_info']['user_name'])
-                    content.write(data['content'])
-                    space.empty()
-
-                st.text_input(
-                    "user_input", key="user_input", label_visibility="collapsed")
-                st.button("Submit", key="message_button",
-                          on_click=submit_message)
-        st.divider()
-    else:
-        st.empty()
+            text_input = st.text_input(
+                "user_input", key="user_input", label_visibility="collapsed")
+            st.button("Submit", key="message_button",
+                      on_click=submit_message, args=(collection, ))
+        else:
+            st.empty()
+    st.divider()
+    clicked_close = st.button("Close", type='primary')
+    if clicked_close:
+        st.session_state['expand_post'] = False
+        st.session_state['post'] = ''
+        st.session_state['obstacle'] = ''
 
 
 def post_modal():
@@ -443,9 +430,12 @@ def auth_modal():
 
 # auth_modal = auth_modal()
 # post_modal = post_modal()
+
 navbar()
-post_expander()
-card_grid(3)
+if st.session_state['expand_post']:
+    post_expander()
+else:
+    card_grid(3)
 
 
 # # Tabs of Categories
