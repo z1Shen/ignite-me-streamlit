@@ -307,13 +307,12 @@ def submit_message():
     else:
         st.session_state['login'] = True
         st.warning("Please Sign In First")
-        close_expander()
+        # close_expander()
 
 
 def open_expdander():
     # post_modal.open()
-    post_modal.open()
-    st.session_state['expand_post'] = True
+    # st.session_state['expand_post'] = True
 
 
 def close_expander():
