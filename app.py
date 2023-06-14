@@ -3,11 +3,14 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore, auth
 from gpt_api import GPT_API
+from streamlit_modal import Modal
+from sign_in_with_email_and_password import sign_in_with_email_and_password
+from send_email_verification_link import send_email_verification_link
 
 
 # Securely connect to Firebase
+key_dict = json.loads(st.secrets["textkey"])
 if not firebase_admin._apps:
-    key_dict = json.loads(st.secrets["textkey"])
     cred = credentials.Certificate(key_dict)
     firebase_admin.initialize_app(cred)
 db = firestore.client()
@@ -32,7 +35,7 @@ for state in session_states:
     if state not in st.session_state:
         st.session_state[state] = ""
 
-session_states = ['expand_post', 'toggle_dialog', 'authentication', 'post_id']
+session_states = ['expand_post', 'toggle_dialog', 'login', 'signup', 'post_id']
 for state in session_states:
     if state not in st.session_state:
         st.session_state[state] = False
@@ -44,8 +47,10 @@ def update_firebase(collection, data):
     doc_ref.set(data)
 
 
-def stream_firebase(collection):
+def stream_firebase(collection, limit=False):
     post_refs = db.collection(collection)
+    if limit:
+        post_refs = post_refs.limit(limit)
     docs = post_refs.stream()
     return docs
 
@@ -53,15 +58,18 @@ def stream_firebase(collection):
 def signup():
     auth_info = st.session_state['auth_info']
     try:
-        user = auth.create_user(email=auth_info['email'])
-
+        user = auth.create_user(
+            email=auth_info['email'], password=auth_info['password'], email_verified=True)
+        # send_email_verification_link(auth_info['email'])
+        # st.info('Please check your email to verify your account.')
         user_info = {
             "user_email": auth_info['email'], "user_name": auth_info['user_name']}
         user_ref = db.collection('users').document(user.uid)
         user_ref.set(user_info)
         st.session_state['user_info'] = user_info
         st.success('Welcome! ' + user_info['user_name'])
-        st.session_state['authentication'] = False
+        st.session_state['login'] = False
+        st.session_state['signup'] = False
         if st.session_state['gpt_response']:
             post_goal()
     except auth.EmailAlreadyExistsError:
@@ -76,17 +84,26 @@ def signup():
 def login():
     auth_info = st.session_state['auth_info']
     try:
-        user = auth.get_user_by_email(auth_info['email'])
-        user_ref = db.collection('users').document(user.uid)
-        user_info = user_ref.get().to_dict()
-        st.session_state['user_info'] = user_info
-        st.session_state['user_name'] = user_info['user_name']
-        st.success('Welcome back! ' + user_info['user_name'])
-        st.session_state['authentication'] = False
-        if st.session_state['gpt_response']:
-            post_goal()
+        # user = auth.get_user_by_email(auth_info['email'])
+        login_res = sign_in_with_email_and_password(
+            auth_info['email'], auth_info['password'])
+        if 'registered' in login_res.keys():
+            user_ref = db.collection('users').document(login_res['localId'])
+            user_info = user_ref.get().to_dict()
+            st.session_state['user_info'] = user_info
+            st.session_state['user_name'] = user_info['user_name']
+            st.success('Welcome back! ' + user_info['user_name'])
+            st.session_state['login'] = False
+            st.session_state['signup'] = False
+            if st.session_state['gpt_response']:
+                post_goal()
+        else:
+            error_message = login_res['error']['message']
+            if error_message == "INVALID_PASSWORD":
+                st.error(login_res['error']['message'])
+            else:
+                st.session_state['signup'] = True
     except auth.UserNotFoundError:
-        # st.sidebar.error('Invalid email or password. Please try again.')
         signup()
 
 
@@ -197,7 +214,7 @@ def follow_up_form():
             if st.session_state['user_info']:
                 post_goal()
             else:
-                st.session_state['authentication'] = True
+                st.session_state['login'] = True
         else:
             st.session_state['gpt_response'] = gpt_response['response']
             st.session_state['user_answer'] = ""
@@ -206,11 +223,15 @@ def follow_up_form():
         st.warning("Please fill all the fields")
 
 
-def card_grid(items_per_col):
+def card_grid(n_cols, n_rows=10):
     docs = stream_firebase("posts")
-    col_list = st.columns(items_per_col)
-    for doc, col, i in zip(docs, col_list, range(items_per_col)):
-        with col:
+
+    rows = [st.container() for _ in range(n_rows)]
+    cols_per_row = [r.columns(n_cols) for r in rows]
+    cols = [column for row in cols_per_row for column in row]
+
+    for i, doc in enumerate(docs):
+        with cols[i].container():
             post = doc.to_dict()
             post['id'] = doc.id
 
@@ -221,7 +242,8 @@ def card_grid(items_per_col):
                 st.session_state['user_goal'] = post["content"]
                 st.session_state['obstacle_value'] = ''
                 st.session_state['post_id'] = post['id']
-                st.session_state['expand_post'] = True
+                # open_expdander()
+
             st.divider()
 
 
@@ -234,18 +256,22 @@ def navbar():
 
     with button:
         if not st.session_state['user_info']:
-            if not st.session_state['authentication']:
-                clicked = button.button('Account')
+            if st.session_state['signup']:
+                button.button('Signup', on_click=signup)
+            elif not st.session_state['login']:
+                clicked = button.button('Login')  # default button
                 if clicked:
-                    st.session_state['authentication'] = True
+                    st.session_state['login'] = True
             else:
-                button.button('Sign in', on_click=login)
+                button.button('Login', on_click=login)
         else:
-            button.button(
-                st.session_state['user_info']['user_name'], on_click=logout)
+            col1, col2 = button.columns([1, 1])
+            col1.header(st.session_state['user_info']['user_name'])
+            col2.button(
+                'Logout', on_click=logout)
 
     with center.container():
-        if st.session_state['authentication']:
+        if st.session_state['login']:
             authenticate()
         else:
             if st.session_state['toggle_dialog']:
@@ -279,13 +305,69 @@ def submit_message():
         update_firebase(collection, data)
         st.session_state['user_input'] = ""
     else:
-        st.session_state['authentication'] = True
-        st.warning("Please sign in to submit message")
+        st.session_state['login'] = True
+        st.warning("Please Sign In First")
+        close_expander()
+
+
+def open_expdander():
+    # post_modal.open()
+    post_modal.open()
+    st.session_state['expand_post'] = True
+
+
+def close_expander():
+    # post_modal.close()
+    st.session_state['post_id'] = False
 
 
 def post_expander():
     if st.session_state['post_id']:
-        with st.expander(st.session_state['user_goal'], expanded=st.session_state['expand_post']):
+        # with st.expander(st.session_state['user_goal'], expanded=st.session_state['expand_post']):
+        left, right = st.columns(2)
+        with left:
+            collection = "posts/{}/obstacles".format(
+                st.session_state['post_id'])
+            obstacles = stream_firebase(collection)
+            st.header(st.session_state['user_goal'])
+            for obstacle in obstacles:
+                data = obstacle.to_dict()
+                clicked = st.button(data['content'])
+                if clicked:
+                    st.session_state['obstacle_value'] = data['content']
+                    st.session_state['obstacle_id'] = obstacle.id
+            st.divider()
+            st.button("Close", type='primary', on_click=close_expander())
+
+        with right:
+            if st.session_state['obstacle_value']:
+                st.subheader(st.session_state['obstacle_value'])
+                st.divider()
+                collection = "posts/{}/obstacles/{}/messages".format(
+                    st.session_state['post_id'], st.session_state['obstacle_id'])
+                docs = stream_firebase(collection)
+                for doc in docs:
+                    data = doc.to_dict()
+
+                    name, content, space = st.columns([2, 5, 2])
+                    name.write(data['user_info']['user_name'])
+                    content.write(data['content'])
+                    space.empty()
+
+                st.text_input(
+                    "user_input", key="user_input", label_visibility="collapsed")
+                st.button("Submit", key="message_button",
+                          on_click=submit_message)
+        st.divider()
+    else:
+        st.empty()
+
+
+def post_modal():
+    modal = Modal(st.session_state['user_goal'],
+                  key=st.session_state['post_id'])
+    if modal.is_open():
+        with modal.container():
             left, right = st.columns(2)
             with left:
                 collection = "posts/{}/obstacles".format(
@@ -319,20 +401,52 @@ def post_expander():
                               on_click=submit_message)
                 else:
                     st.empty()
+    return modal
 
 
 def authenticate():
     left, right = st.columns(2)
     with left:
-        user_name = st.text_input('Please input your user name')
-    with right:
         email = st.text_input('Please enter your email address')
-    st.session_state['auth_info'] = {'user_name': user_name, 'email': email}
+    with right:
+        password = st.text_input('Please input your password', type='password')
+    st.session_state['auth_info'] = {'email': email, 'password': password}
+    if st.session_state['signup']:
+        user_name = st.text_input('Please enter your user name')
+        st.session_state['auth_info']['user_name'] = user_name
 
 
+def auth_modal():
+    modal = Modal('Login', key='login')
+    if modal.is_open():
+        with modal.container():
+            auth_choice = st.radio('Signup or Login', ('Login', 'Signup'))
+            if auth_choice == 'Signup':
+                user_name = st.text_input('Please input your user name')
+                email = st.text_input('Please enter your email address')
+                password = st.text_input(
+                    'Please enter your password', type='password')
+                st.session_state['auth_info'] = {
+                    'user_name': user_name, 'email': email, 'password': password}
+            else:
+                email = st.text_input('Please enter your email address')
+                password = st.text_input(
+                    'Please enter your password', type='password')
+                st.session_state['auth_info'] = {
+                    'email': email, 'password': password}
+
+            if auth_choice == 'Signup':
+                st.button('Signup', on_click=signup())
+            else:
+                st.button('Login', on_click=login())
+    return modal
+
+
+# auth_modal = auth_modal()
+# post_modal = post_modal()
 navbar()
-card_grid(3)
 post_expander()
+card_grid(3)
 
 
 # # Tabs of Categories
