@@ -56,14 +56,48 @@ def stream_firebase(collection, limit=False):
     return docs
 
 
+def login():
+    st.session_state['toggle_login'] = False
+    auth_info = {'email': st.session_state['email_input'],
+                 'password': st.session_state['password_input']}
+    try:
+        # user = auth.get_user_by_email(auth_info['email'])
+        login_res = sign_in_with_email_and_password(**auth_info)
+        if 'registered' in login_res.keys():
+            user_ref = db.collection('users').document(login_res['localId'])
+            auth_info = user_ref.get().to_dict()
+
+            if 'user_name' in auth_info.keys():  # todo: remove this
+                auth_info['display_name'] = auth_info['user_name']
+            st.session_state['user_info'] = auth_info
+            st.success('Welcome back! ' + auth_info['display_name'])
+            st.session_state['toggle_login'] = False
+            st.session_state['toggle_signup'] = False
+            if st.session_state['gpt_response']:
+                submit_goal()
+        else:
+            error_message = login_res['error']['message']
+            st.session_state['user_info'] = ''
+            if error_message == "INVALID_PASSWORD":
+                st.error(login_res['error']['message'])
+            else:
+                st.session_state['toggle_signup'] = True
+    except auth.UserNotFoundError:
+        signup()
+
+
 def signup():
-    auth_info = st.session_state['user_info']
+    st.session_state['toggle_signup'] = False
+    auth_info = {'email': st.session_state['email_input'],
+                 'password': st.session_state['password_input'],
+                 'display_name': st.session_state['display_name_input']}
     try:
         user = auth.create_user(**auth_info)
         # send_email_verification_link(auth_info['email'])
         # st.info('Please check your email to verify your account.')
         user_ref = db.collection('users').document(user.uid)
         user_ref.set(auth_info)
+        st.session_state['user_info'] = auth_info
 
         st.success('Welcome! ' + auth_info['display_name'])
         st.session_state['toggle_login'] = False
@@ -79,34 +113,6 @@ def signup():
         st.sidebar.error(
             'Account creation failed. Please try again later.')
         st.write(e)
-
-
-def login():
-    auth_info = st.session_state['user_info']
-    try:
-        # user = auth.get_user_by_email(auth_info['email'])
-        login_res = sign_in_with_email_and_password(**auth_info)
-        if 'registered' in login_res.keys():
-            user_ref = db.collection('users').document(login_res['localId'])
-            auth_info = user_ref.get().to_dict()
-
-            if 'user_name' in auth_info.keys():  # todo: remove this
-                auth_info['display_name'] = auth_info['user_name']
-            st.session_state['user_info']['display_name'] = auth_info['display_name']
-            st.success('Welcome back! ' + auth_info['display_name'])
-            st.session_state['toggle_login'] = False
-            st.session_state['toggle_signup'] = False
-            if st.session_state['gpt_response']:
-                submit_goal()
-        else:
-            error_message = login_res['error']['message']
-            st.session_state['user_info'] = ''
-            if error_message == "INVALID_PASSWORD":
-                st.error(login_res['error']['message'])
-            else:
-                st.session_state['toggle_signup'] = True
-    except auth.UserNotFoundError:
-        signup()
 
 
 def logout():
@@ -259,24 +265,28 @@ def navbar():
 
     with button:
         user_info = st.session_state['user_info']
+        toggle_auth = st.session_state['toggle_signup'] or st.session_state['toggle_login']
         if user_info and 'display_name' in user_info.keys():
             col1, col2 = button.columns([1, 1])
             col1.header(st.session_state['user_info']['display_name'])
             col2.button(
                 'Logout', on_click=logout)
+        elif not toggle_auth:
+            login, signup = button.columns(2)
+            clicked = login.button('Login')
+            if clicked:
+                st.session_state['toggle_login'] = True
+            clicked = signup.button('Signup')
+            if clicked:
+                st.session_state['toggle_signup'] = True
         else:
-            if st.session_state['toggle_signup']:
-                button.button('Signup', on_click=signup)
-            elif st.session_state['toggle_login']:
-                button.button('Login', on_click=login)
-            else:
-                clicked = button.button('Login')  # default button
-                if clicked:
-                    st.session_state['toggle_login'] = True
+            st.empty()
 
     with center.container():
         if st.session_state['toggle_login']:
-            auth_form()
+            login_form()
+        elif st.session_state['toggle_signup']:
+            signup_form()
         else:
             if st.session_state['toggle_dialog']:
                 if not st.session_state['toggle_gpt']:
@@ -338,16 +348,29 @@ def post_expander():
         st.session_state['obstacle'] = ''
 
 
-def auth_form():
-    left, right = st.columns(2)
-    with left:
-        email = st.text_input('Please enter your email address')
-    with right:
-        password = st.text_input('Please input your password', type='password')
-    st.session_state['user_info'] = {'email': email, 'password': password}
-    if st.session_state['toggle_signup']:
-        display_name = st.text_input('Please enter your user name')
-        st.session_state['user_info']['display_name'] = display_name
+def login_form():
+    with st.form(key="login_form"):
+        left, right = st.columns(2)
+        with left:
+            st.text_input('Please enter your email address', key='email_input')
+        with right:
+            st.text_input('Please input your password',
+                          key='password_input', type='password')
+        st.form_submit_button('Login', on_click=login)
+
+
+def signup_form():
+    with st.form(key="signup_form"):
+        left, right = st.columns(2)
+        with left:
+            st.text_input(
+                'Please enter your email address', key='email_input')
+        with right:
+            st.text_input(
+                'Please input your password', key='password_input', type='password')
+        st.text_input(
+            'Please enter your user name', key='display_name_input')
+        st.form_submit_button('Signup', on_click=signup)
 
 
 def initial_form():
