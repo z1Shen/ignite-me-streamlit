@@ -310,7 +310,7 @@ def submit_message():
         # close_expander()
 
 
-def open_expdander():
+# def open_expdander():
     # post_modal.open()
     # st.session_state['expand_post'] = True
 
